@@ -36,38 +36,66 @@ namespace SampleWeb
                 new { controller = "Home", action = "Index", id = UrlParameter.Optional });
         }
 
+        public static string ApplicationStartTimings { get; private set; }
+
         /// <summary>
         /// The application start event.
         /// </summary>
         protected void Application_Start()
         {
-            RegisterRoutes(RouteTable.Routes);
+            var prof = new MiniProfiler(""); 
 
-            InitProfilerSettings();
-
-            // this is only done for testing purposes so we don't check in the db to source control
-            // parameter table is only used in this project for sample queries
-            // yes, it is ugly, and do not do this unless you know for sure that the second Store in the MultiStorageProvider is of this type
-            ((SqliteMiniProfilerStorage)((MultiStorageProvider)MiniProfiler.Settings.Storage).Stores[1]).RecreateDatabase("create table RouteHits(RouteName,HitCount,unique(RouteName))");
-
-            var entityFrameworkDataPath = HttpContext.Current.Server.MapPath("~/App_Data/SampleWeb.EFCodeFirst.EFContext.sdf");
-            if (File.Exists(entityFrameworkDataPath))
+            using (prof.Step("Application_Start")) // HACK: we never call .Stop or .Save, so root timing's duration isn't set
             {
-                File.Delete(entityFrameworkDataPath);
+                using (prof.Step("Register Routes"))
+                {
+                    RegisterRoutes(RouteTable.Routes);
+                }
+
+                using (prof.Step("Init MiniProfiler"))
+                {
+                    InitProfilerSettings();
+
+                    // this is only done for testing purposes so we don't check in the db to source control
+                    // parameter table is only used in this project for sample queries
+                    // yes, it is ugly, and do not do this unless you know for sure that the second Store in the MultiStorageProvider is of this type
+                    ((SqliteMiniProfilerStorage)((MultiStorageProvider)MiniProfiler.Settings.Storage).Stores[1]).RecreateDatabase("create table RouteHits(RouteName,HitCount,unique(RouteName))");
+                }
+
+                using (prof.Step("Init EF Stuff"))
+                {
+                    var entityFrameworkDataPath = HttpContext.Current.Server.MapPath("~/App_Data/SampleWeb.EFCodeFirst.EFContext.sdf");
+                    if (File.Exists(entityFrameworkDataPath))
+                    {
+                        File.Delete(entityFrameworkDataPath);
+                    }
+                }
+
+                using (prof.Step("Init Magic Profiling"))
+                {
+                    // Setup profiler for Controllers via a Global ActionFilter
+                    GlobalFilters.Filters.Add(new ProfilingActionFilter());
+
+                    // initialize automatic view profiling
+                    var copy = ViewEngines.Engines.ToList();
+                    ViewEngines.Engines.Clear();
+                    foreach (var item in copy)
+                    {
+                        ViewEngines.Engines.Add(new ProfilingViewEngine(item));
+                    }
+
+                    MiniProfilerEF6.Initialize();
+                }
             }
 
-            // Setup profiler for Controllers via a Global ActionFilter
-            GlobalFilters.Filters.Add(new ProfilingActionFilter());
-
-            // initialize automatic view profiling
-            var copy = ViewEngines.Engines.ToList();
-            ViewEngines.Engines.Clear();
-            foreach (var item in copy)
+            try
             {
-                ViewEngines.Engines.Add(new ProfilingViewEngine(item));
+                ApplicationStartTimings = prof.Render().ToString();
             }
-
-            MiniProfilerEF6.Initialize();
+            catch (Exception ex)
+            {
+                ApplicationStartTimings = ex.ToString();
+            }
         }
 
         /// <summary>
